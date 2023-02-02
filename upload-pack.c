@@ -985,9 +985,34 @@ static int process_deepen_not(const char *line, struct string_list *deepen_not, 
 	if (skip_prefix(line, "deepen-not ", &arg)) {
 		char *ref = NULL;
 		struct object_id oid;
-		if (expand_ref(the_repository, arg, strlen(arg), &oid, &ref) != 1)
-			die("git upload-pack: ambiguous deepen-not: %s", line);
-		string_list_append(deepen_not, ref);
+
+		switch (expand_ref(the_repository, arg, strlen(arg), &oid, &ref)) {
+		case 0: {
+			// no tags or branches matching arg
+			struct object *obj = NULL;
+			struct commit *commit = NULL;
+
+			if (get_oid(arg, &oid))
+				die("git upload-pack: deepen-not: no ref or object %s", arg);
+
+			obj = parse_object(the_repository, &oid);
+			if (!obj)
+				die("git upload-pack: deepen-not: object could not be parsed: %s", arg);
+
+			commit = (struct commit *)peel_to_type(arg, 0, obj, OBJ_COMMIT);
+			if (!commit)
+				die("git upload-pack: deepen-not: object not a commit: %s", arg);
+			string_list_append(deepen_not, oid_to_hex(&commit->object.oid));
+			break;
+		}
+		case 1:
+			// tag or branch matches arg
+			string_list_append(deepen_not, ref);
+			break;
+		default:
+			// more than 1 tag or branch matches arg
+			die("git upload-pack: ambiguous deepen-not: %s", arg);
+		}
 		free(ref);
 		*deepen_rev_list = 1;
 		return 1;
